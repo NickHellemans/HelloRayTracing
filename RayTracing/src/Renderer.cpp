@@ -44,8 +44,11 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
     m_ImageData = new uint32_t[width * height];
 }
 
-void Renderer::Render()
+void Renderer::Render(const Camera& camera)
 {
+    //const glm::vec3& rayOrigin = camera.GetPosition();
+    Ray ray;
+    ray.Origin = camera.GetPosition();
     //Render every pixel of viewport
     //Fill image data
     //Iterate through y first = better performance - next uint32 is horizontal - dont want to skip "rows" if
@@ -54,12 +57,16 @@ void Renderer::Render()
     {
         for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++) {
             //get coordinate in space - 
-            glm::vec2 coord = {x/(float) m_FinalImage->GetWidth(), y/(float) m_FinalImage->GetHeight()};
-
+            //glm::vec2 coord = {x/(float) m_FinalImage->GetWidth(), y/(float) m_FinalImage->GetHeight()};
+            
             //Remap 0-1 to -1-1 : to get rays in all directions
-            coord = coord * 2.0f - 1.0f;
+            //coord = coord * 2.0f - 1.0f;
+
+            //Dont need to get coord anymore -> calculation inside GetRayDirections
+            ray.Direction = camera.GetRayDirections()[x+y*m_FinalImage->GetWidth()];
+            
             //Get color for pixel
-            glm::vec4 color = PerPixel(coord);
+            glm::vec4 color = TraceRay(ray);
             //clamp values between 0 and 1 so we dont get any spill into other channels - 1 = 255 = max
             //GPU will do this for us but we are on CPU
             color = glm::clamp(color,glm::vec4(0.0f), glm::vec4(1.0f));
@@ -71,12 +78,13 @@ void Renderer::Render()
     m_FinalImage->SetData(m_ImageData);
 }
 
-glm::vec4 Renderer::PerPixel(glm::vec2 coord)
+//glm::vec4 Renderer::PerPixel(glm::vec2 coord)
+glm::vec4 Renderer::TraceRay(const Ray& ray)
 {
     //Convert coord in to color channel: x = red, y = green
     //8bits per color channel: rgba
-    uint8_t r = (uint8_t) (coord.x * 255.0f);
-    uint8_t g = (uint8_t) (coord.y * 255.0f);
+    //uint8_t r = (uint8_t) (coord.x * 255.0f);
+    //uint8_t g = (uint8_t) (coord.y * 255.0f);
 
     /* Fn of circle substituted with values for a and b
      * (bx^2 + by^2)t^2 + (2(axbx + ayby))t + (ax^2 + ay^2 - r^2) = 0
@@ -87,26 +95,27 @@ glm::vec4 Renderer::PerPixel(glm::vec2 coord)
      * t = hit distance
      */
 
+    //Dont need these anymore(rayOrigin and direction) because we have everything in ray object
     //Set forward axis of our camera shooting rays to -1
     //so it has a z dimension else rays would get casted in 2d space and wont hit anything -> -1 or 1 depends on
     //right or left handed rule
-    glm::vec3 rayDirection = {coord.x, coord.y, -1.0f};
+    //glm::vec3 rayDirection = {coord.x, coord.y, -1.0f};
     //rayDirection = glm::normalize(rayDirection);
 
     //Origin of rays - move camera back along z so it is not inside our circle
-    glm::vec3 rayOrigin(0.0f, 0.0f, 1.0f);
+    //glm::vec3 rayOrigin(0.0f, 0.0f, 1.0f);
 
     //Radius of our sphere
     float radius = 0.5f;
     
     // Named by convention of quadratic formula: a, b, c -> a^2t + bt + c
     //a = (bx^2 + by^2) -> operation = dot product with self : multiple components and add (bx * bx + by * by)
-    float a = glm::dot(rayDirection, rayDirection);
+    float a = glm::dot(ray.Direction, ray.Direction);
     //b = (2(axbx + ayby)) -> dot product: multiple each component from a with b and add
-    float b = 2.0f * (glm::dot(rayOrigin, rayDirection) );
+    float b = 2.0f * (glm::dot(ray.Origin, ray.Direction) );
     // c = (ax^2 + ay^2 - r^2) -> dot product of a with a - r^2
-    float c = glm::dot(rayOrigin, rayOrigin) - radius * radius;
-
+    float c = glm::dot(ray.Origin, ray.Origin) - radius * radius;
+ 
     //Fill these in to discriminant and quadratic formula to find solutions
     //Discriminant = b^2 - 4ac
     
@@ -133,7 +142,7 @@ glm::vec4 Renderer::PerPixel(glm::vec2 coord)
     //t = hit distance -> plug in original ray equation to find point -> a + bt 
     //No need to do every coord by itself -> glm takes care of it
     //glm::vec3 h0 = rayOrigin + rayDirection * t0;
-    glm::vec3 hitPoint = rayOrigin + rayDirection * closestT;
+    glm::vec3 hitPoint = ray.Origin + ray.Direction * closestT;
     //Can use hitpoint as color -> is a vec3. Basically take every coordinate of the hit points and use that as color
     // x = r, y = g and z = b
     //Negative on x and y will get clamped to 0 so we get blue in middle and bottom left
