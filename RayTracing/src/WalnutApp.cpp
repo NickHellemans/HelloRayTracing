@@ -30,7 +30,9 @@ public:
 		//Display image if it exists
 		auto image = m_Renderer.GetFinalImage();
 		if(image)
-			ImGui::Image(image->GetDescriptorSet(), { (float)image->GetWidth(), (float)image->GetHeight() });
+			ImGui::Image(image->GetDescriptorSet(), { (float)image->GetWidth(),
+				(float)image->GetHeight()},ImVec2(0,1), ImVec2(1,0));
+		//uv0 and uv1 set origin of image: default (0,0) -> to flip image uv0 = (0,1) flip y, uv1 = (1,0) flip x
 		ImGui::End();
 		//Pop style var once window ends
 		ImGui::PopStyleVar();

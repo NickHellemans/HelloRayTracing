@@ -1,6 +1,8 @@
 ﻿#pragma once 
 #include "Walnut/Image.h"
 #include <memory>
+#include <glm/vec2.hpp>
+#include <glm/vec4.hpp>
 
 class Renderer
 {
@@ -12,4 +14,6 @@ public:
 private:
     std::shared_ptr<Walnut::Image> m_FinalImage;
     uint32_t* m_ImageData = nullptr;
+    //Basicly like a shader: Return a color per pixel from viewport based on coord in viewport
+    glm::vec4 PerPixel(glm::vec2 coord);
 };
