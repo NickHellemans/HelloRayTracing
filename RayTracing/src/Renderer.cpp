@@ -44,7 +44,7 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
     m_ImageData = new uint32_t[width * height];
 }
 
-void Renderer::Render(const Camera& camera)
+void Renderer::Render(const Scene& scene, const Camera& camera)
 {
     //const glm::vec3& rayOrigin = camera.GetPosition();
     Ray ray;
@@ -66,7 +66,7 @@ void Renderer::Render(const Camera& camera)
             ray.Direction = camera.GetRayDirections()[x+y*m_FinalImage->GetWidth()];
             
             //Get color for pixel
-            glm::vec4 color = TraceRay(ray);
+            glm::vec4 color = TraceRay(scene, ray);
             //clamp values between 0 and 1 so we dont get any spill into other channels - 1 = 255 = max
             //GPU will do this for us but we are on CPU
             color = glm::clamp(color,glm::vec4(0.0f), glm::vec4(1.0f));
@@ -79,7 +79,7 @@ void Renderer::Render(const Camera& camera)
 }
 
 //glm::vec4 Renderer::PerPixel(glm::vec2 coord)
-glm::vec4 Renderer::TraceRay(const Ray& ray)
+glm::vec4 Renderer::TraceRay(const Scene& scene, const Ray& ray)
 {
     //Convert coord in to color channel: x = red, y = green
     //8bits per color channel: rgba
@@ -105,44 +105,68 @@ glm::vec4 Renderer::TraceRay(const Ray& ray)
     //Origin of rays - move camera back along z so it is not inside our circle
     //glm::vec3 rayOrigin(0.0f, 0.0f, 1.0f);
 
-    //Radius of our sphere
-    float radius = 0.5f;
-    
-    // Named by convention of quadratic formula: a, b, c -> a^2t + bt + c
-    //a = (bx^2 + by^2) -> operation = dot product with self : multiple components and add (bx * bx + by * by)
-    float a = glm::dot(ray.Direction, ray.Direction);
-    //b = (2(axbx + ayby)) -> dot product: multiple each component from a with b and add
-    float b = 2.0f * (glm::dot(ray.Origin, ray.Direction) );
-    // c = (ax^2 + ay^2 - r^2) -> dot product of a with a - r^2
-    float c = glm::dot(ray.Origin, ray.Origin) - radius * radius;
- 
-    //Fill these in to discriminant and quadratic formula to find solutions
-    //Discriminant = b^2 - 4ac
-    
-    float discriminant = b * b - 4.0f * a * c; //Check if there are solutions or not, no need to go further if there are no solutions
-    if (discriminant < 0.0f)
+    //Radius of our sphere - we get radius from sphere itself now
+    //float radius = 0.5f;
+
+    if (scene.Spheres.empty())
         return {0,0,0,1};
+
+    const Sphere* closestSphere = nullptr;
+    float hitDistance = FLT_MAX; //Keep closest so far
+    for (const Sphere& sphere : scene.Spheres)
+    {
+        //Moving sphere by moving the ray origin/camera by sphere pos, effectively adding 0.5 to x component of the ray origin and using this as new origin
+        //glm::vec3 origin = ray.Origin - glm::vec3(-0.5f, 0.0f, 0.0f);
+        glm::vec3 origin = ray.Origin - sphere.Position;
+    
+        // Named by convention of quadratic formula: a, b, c -> a^2t + bt + c
+        //a = (bx^2 + by^2) -> operation = dot product with self : multiple components and add (bx * bx + by * by)
+        float a = glm::dot(ray.Direction, ray.Direction);
+        //b = (2(axbx + ayby)) -> dot product: multiple each component from a with b and add
+        float b = 2.0f * (glm::dot(origin, ray.Direction) );
+        // c = (ax^2 + ay^2 - r^2) -> dot product of a with a - r^2
+        float c = glm::dot(origin, origin) - sphere.Radius * sphere.Radius;
+        //Fill these in to discriminant and quadratic formula to find solutions
+        //Discriminant = b^2 - 4ac
+    
+        float discriminant = b * b - 4.0f * a * c; //Check if there are solutions or not, no need to go further if there are no solutions/hits
+        if (discriminant < 0.0f)
+            continue; //Check for other possible spheres
+        //return {0,0,0,1};
         //return 0xffff00ff;
 
-    //Part before solutions -> return color based on discriminant
-    //return glm::vec4(0,0,0,1);    
-    //return 0xff000000; -> this order is abgr but in vector order is rgba (more logical for us )but have to make sure in memory
-    //is correct by adjusting the bits to their right place -> 0xff000000
-    //return 0xff000000 | (g<<8) | r; // OR red and green (offset by 8 so its after red) channels into color with alpha = 1 , blue = 00
-    //m_ImageData[i] = Walnut::Random::UInt(); 
-    //m_ImageData[i] |= 0xff000000; 
-    // 0xffff00ff : From l->r: ABGR, 1 byte each == 2 letters
-    //Or equals to set bits of alpha channel to 1 (most significant) because
-    //random uint will give us random alpha values aswell and we want to see image
+        //Part before solutions -> return color based on discriminant
+        //return glm::vec4(0,0,0,1);    
+        //return 0xff000000; -> this order is abgr but in vector order is rgba (more logical for us )but have to make sure in memory
+        //is correct by adjusting the bits to their right place -> 0xff000000
+        //return 0xff000000 | (g<<8) | r; // OR red and green (offset by 8 so its after red) channels into color with alpha = 1 , blue = 00
+        //m_ImageData[i] = Walnut::Random::UInt(); 
+        //m_ImageData[i] |= 0xff000000; 
+        // 0xffff00ff : From l->r: ABGR, 1 byte each == 2 letters
+        //Or equals to set bits of alpha channel to 1 (most significant) because
+        //random uint will give us random alpha values aswell and we want to see image
 
-    //Quadratic formula = (-b +- sqrt(discriminant) / 2a -> find solutions
-    float t0 = (-b + glm::sqrt(discriminant)) / (2.0f * a);
-    float closestT = (-b - glm::sqrt(discriminant)) / (2.0f * a); //closest to origin - a will never be negative and we subtract 
+        //Quadratic formula = (-b +- sqrt(discriminant) / 2a -> find solutions
+        float t0 = (-b + glm::sqrt(discriminant)) / (2.0f * a);
+        float closestT = (-b - glm::sqrt(discriminant)) / (2.0f * a); //closest to origin (camera) - a will never be negative and we subtract
+        //For multiple spheres: Check all hits for a ray and get closest (not thinking about translucent objects yet)
+        if (closestT < hitDistance)
+        {
+            hitDistance = closestT;
+            closestSphere = &sphere;
+        }
+    }
+  //if sphere is still nullptr after going through scene, then we didnt hit a single sphere so return with default color  
+ if(closestSphere == nullptr)
+     return {0.0f, 0.0f, 0.0f, 1.0f};
+
+    //Recalculate origin for closest sphere
+    glm::vec3 origin = ray.Origin - closestSphere->Position;
     
     //t = hit distance -> plug in original ray equation to find point -> a + bt 
     //No need to do every coord by itself -> glm takes care of it
     //glm::vec3 h0 = rayOrigin + rayDirection * t0;
-    glm::vec3 hitPoint = ray.Origin + ray.Direction * closestT;
+    glm::vec3 hitPoint = origin + ray.Direction * hitDistance;
     //Can use hitpoint as color -> is a vec3. Basically take every coordinate of the hit points and use that as color
     // x = r, y = g and z = b
     //Negative on x and y will get clamped to 0 so we get blue in middle and bottom left
@@ -175,7 +199,7 @@ glm::vec4 Renderer::TraceRay(const Ray& ray)
     //Clamp to 0 if result is negative = facing away
     float d = glm::max(glm::dot(normal, -lightDir), 0.0f);
     
-    glm::vec3 sphereColor(1,0,1);
+    glm::vec3 sphereColor = closestSphere->Albedo;
     //result of dot product gives us the intensity of what the color should be
     sphereColor *= d;
     return {sphereColor, 1.0f};
