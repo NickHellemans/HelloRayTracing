@@ -52,6 +52,8 @@ public:
 		Timer timer;
 		m_Renderer.OnResize(m_ViewportWidth, m_ViewportHeight);
 		m_Camera.OnResize(m_ViewportWidth, m_ViewportHeight);
+		//Pass a camera to renderer , instead of having it in renderer itself -> dont want renderer to control where we render from
+		//Pass as a viewport to render from
 		m_Renderer.Render(m_Camera);
 		//Set timer to see how long it took to render
 		m_LastRenderTime = timer.ElapsedMillis();

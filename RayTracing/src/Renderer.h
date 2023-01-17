@@ -17,5 +17,5 @@ private:
     uint32_t* m_ImageData = nullptr;
     //Basicly like a shader: Return a color per pixel from viewport based on coord in viewport
     //glm::vec4 PerPixel(glm::vec2 coord);
-    glm::vec4 TraceRay(const Ray& ray);
+glm::vec4 TraceRay(const Ray& ray);
 };

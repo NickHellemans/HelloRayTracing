@@ -121,7 +121,7 @@ glm::vec4 Renderer::TraceRay(const Ray& ray)
     
     float discriminant = b * b - 4.0f * a * c; //Check if there are solutions or not, no need to go further if there are no solutions
     if (discriminant < 0.0f)
-        return glm::vec4(0,0,0,1);
+        return {0,0,0,1};
         //return 0xffff00ff;
 
     //Part before solutions -> return color based on discriminant
@@ -178,5 +178,6 @@ glm::vec4 Renderer::TraceRay(const Ray& ray)
     glm::vec3 sphereColor(1,0,1);
     //result of dot product gives us the intensity of what the color should be
     sphereColor *= d;
-    return glm::vec4(sphereColor, 1.0f);
+    return {sphereColor, 1.0f};
+    //glm::vec4(sphereColor, 1.0f);
 }

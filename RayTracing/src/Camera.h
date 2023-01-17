@@ -3,22 +3,37 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+//Implement camera:
+//Makes it easier to change/control field of view, size of sensor capturing light
+//Easier to change position and rotation -> Interact with the camera
 class Camera
 {
 public:
+    //verticalFOV in degrees
+    //near and far clipping planes of what our camera can see to create frostum -> anything outside frostum will be clipped = not rendered
+    //Why clipped? Take data and convert it to -1, 1 space -> anything out of that range will not end up on screen
     Camera(float verticalFOV, float nearClip, float farClip);
 
+    //Needs to run on every frame with timestamp ts -> move around with constant speed independent on frame rate
     void OnUpdate(float ts);
+    
+    //Recalculate projection matrix
     void OnResize(uint32_t width, uint32_t height);
 
+    //Getters for various details of camera
     const glm::mat4& GetProjection() const { return m_Projection; }
     const glm::mat4& GetInverseProjection() const { return m_InverseProjection; }
     const glm::mat4& GetView() const { return m_View; }
     const glm::mat4& GetInverseView() const { return m_InverseView; }
-	
+
+    //Where in space
     const glm::vec3& GetPosition() const { return m_Position; }
+    //Where is it pointing
     const glm::vec3& GetDirection() const { return m_ForwardDirection; }
 
+    //Convert camera projection matrices and view matrix, ... into ray directions and map to -1 and 1
+    //On CPU might be slow --> will move to GPU and will be no problem
+    //But for now we cache the directions so we dont have to recalculate when camera is not moving 
     const std::vector<glm::vec3>& GetRayDirections() const { return m_RayDirections; }
 
     float GetRotationSpeed();
