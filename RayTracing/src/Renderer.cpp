@@ -46,9 +46,11 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 
 void Renderer::Render(const Scene& scene, const Camera& camera)
 {
+    m_ActiveScene = &scene;
+    m_ActiveCamera = &camera;
+    
     //const glm::vec3& rayOrigin = camera.GetPosition();
-    Ray ray;
-    ray.Origin = camera.GetPosition();
+
     //Render every pixel of viewport
     //Fill image data
     //Iterate through y first = better performance - next uint32 is horizontal - dont want to skip "rows" if
@@ -63,10 +65,9 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
             //coord = coord * 2.0f - 1.0f;
 
             //Dont need to get coord anymore -> calculation inside GetRayDirections
-            ray.Direction = camera.GetRayDirections()[x+y*m_FinalImage->GetWidth()];
             
             //Get color for pixel
-            glm::vec4 color = TraceRay(scene, ray);
+            glm::vec4 color = PerPixel(x, y);
             //clamp values between 0 and 1 so we dont get any spill into other channels - 1 = 255 = max
             //GPU will do this for us but we are on CPU
             color = glm::clamp(color,glm::vec4(0.0f), glm::vec4(1.0f));
@@ -78,9 +79,106 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
     m_FinalImage->SetData(m_ImageData);
 }
 
-//glm::vec4 Renderer::PerPixel(glm::vec2 coord)
-glm::vec4 Renderer::TraceRay(const Scene& scene, const Ray& ray)
+glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 {
+    Ray ray;
+    ray.Origin = m_ActiveCamera->GetPosition();
+    ray.Direction = m_ActiveCamera->GetRayDirections()[x+y*m_FinalImage->GetWidth()];
+
+    glm::vec3 color(0.0f);
+    float multiplier = 1.0f;
+    
+    int bounces = 2;
+    for(int i = 0; i < bounces; i++)
+    {
+        HitPayload payload = TraceRay(ray);
+
+        if (payload.HitDistance < 0.0f)
+        {
+            glm::vec3 skyColor = glm::vec3(0.0f,0.0f, 0.0f);
+            color += skyColor * multiplier;
+            break;
+        }
+    
+        //Now we are just shooting rays in -z direction and we dont get much out of the normals -> everything face us is
+        //in +z direction so everything is blue mostly
+        //We need a light direction on our sphere so we can compare our normals to that direction instead
+        //This way we can find HOW MUCH our surface is facing the light
+        //Define a direction vector going in -x, -y and -z -> from right, top and front
+        glm::vec3 lightDir = glm::normalize(glm::vec3(-1,-1,-1));
+
+        //direction of light is going towards us -> we want to compare normal with direction that is going towards light direction
+        //Incoming vs outgoing direction vector
+        //Negate incoming direction -> flips it
+        //To compare the 2 vectors we use the dot product
+        //It will tell us the relationship between the 2 directional vectors
+        //The value between -1 and 1 will tell how much the vectors look like each other 1 is exact same , -1 is total other direction
+        //We can use this to tell how much it is facing the light and make those areas lighter
+
+        //Clamp to 0 if result is negative = facing away
+        float d = glm::max(glm::dot(payload.WorldNormal, -lightDir), 0.0f);
+
+        const Sphere& sphere = m_ActiveScene->Spheres[payload.ObjectIndex];
+        glm::vec3 sphereColor = sphere.Albedo;
+        //result of dot product gives us the intensity of what the color should be
+        sphereColor *= d;
+        color += sphereColor * multiplier;
+        multiplier *= 0.7f;
+
+        ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f; //move little bit forward so next ray doesnt collide with previous sphere
+        //reflect new ray around world normal of sphere
+        ray.Direction =  glm::reflect(ray.Direction, payload.WorldNormal);
+    }
+
+    return {color, 1.0f};
+    //glm::vec4(sphereColor, 1.0f);
+}
+
+Renderer::HitPayload Renderer::ClosestHit(const Ray& ray, float hitDistance, int objectIndex)
+{
+    HitPayload payload;
+    payload.HitDistance = hitDistance;
+    payload.ObjectIndex = objectIndex;
+    
+    const Sphere& closestSphere = m_ActiveScene->Spheres[objectIndex];
+    //Recalculate origin for closest sphere
+    glm::vec3 origin = ray.Origin - closestSphere.Position;
+    
+    //t = hit distance -> plug in original ray equation to find point -> a + bt 
+    //No need to do every coord by itself -> glm takes care of it
+    //glm::vec3 h0 = rayOrigin + rayDirection * t0;
+    payload.WorldPosition = origin + ray.Direction * hitDistance;
+    //Can use hitpoint as color -> is a vec3. Basically take every coordinate of the hit points and use that as color
+    // x = r, y = g and z = b
+    //Negative on x and y will get clamped to 0 so we get blue in middle and bottom left
+    //More red going right x++
+    //More green going up y++
+
+    //We need to get direction sphere is facing in to correctly light it/shade it
+    //Need to know for every pixel where it is facing --> Get the normal for every pixel
+    //To get normal for every pixel in a sphere is easy -> subtract origin from the hit points
+    //Our current origin for our sphere = 0 -> hit point = normal
+    //Need to normalize to only get a direction vector not the whole radius (if radius is big, we dont want that)
+    //Just need the direction, length doesnt matter for the normal
+    payload.WorldNormal = glm::normalize(payload.WorldPosition);
+
+    //Add back the sphere position to get correct world position
+    payload.WorldPosition += closestSphere.Position;
+    
+    return payload;   
+}
+
+Renderer::HitPayload Renderer::Miss(const Ray& ray)
+{
+    HitPayload payload;
+    payload.HitDistance = -1.0f;
+    return payload;
+}
+
+//glm::vec4 Renderer::PerPixel(glm::vec2 coord)
+Renderer::HitPayload Renderer::TraceRay(const Ray& ray)
+{
+    
     //Convert coord in to color channel: x = red, y = green
     //8bits per color channel: rgba
     //uint8_t r = (uint8_t) (coord.x * 255.0f);
@@ -107,14 +205,12 @@ glm::vec4 Renderer::TraceRay(const Scene& scene, const Ray& ray)
 
     //Radius of our sphere - we get radius from sphere itself now
     //float radius = 0.5f;
-
-    if (scene.Spheres.empty())
-        return {0,0,0,1};
-
-    const Sphere* closestSphere = nullptr;
+    
+    int closestSphere = -1;
     float hitDistance = FLT_MAX; //Keep closest so far
-    for (const Sphere& sphere : scene.Spheres)
+    for (size_t i = 0; i < m_ActiveScene->Spheres.size(); i++)
     {
+        const Sphere& sphere = m_ActiveScene->Spheres[i];
         //Moving sphere by moving the ray origin/camera by sphere pos, effectively adding 0.5 to x component of the ray origin and using this as new origin
         //glm::vec3 origin = ray.Origin - glm::vec3(-0.5f, 0.0f, 0.0f);
         glm::vec3 origin = ray.Origin - sphere.Position;
@@ -150,58 +246,16 @@ glm::vec4 Renderer::TraceRay(const Scene& scene, const Ray& ray)
         float t0 = (-b + glm::sqrt(discriminant)) / (2.0f * a);
         float closestT = (-b - glm::sqrt(discriminant)) / (2.0f * a); //closest to origin (camera) - a will never be negative and we subtract
         //For multiple spheres: Check all hits for a ray and get closest (not thinking about translucent objects yet)
-        if (closestT < hitDistance)
+        //If distance is negative relative to camera it does not make sense so we disregard this point
+        if ( closestT > 0.0f && closestT < hitDistance)
         {
             hitDistance = closestT;
-            closestSphere = &sphere;
+            closestSphere = (int) i;
         }
     }
-  //if sphere is still nullptr after going through scene, then we didnt hit a single sphere so return with default color  
- if(closestSphere == nullptr)
-     return {0.0f, 0.0f, 0.0f, 1.0f};
+      //if sphere is still nullptr after going through scene, then we didnt hit a single sphere so return with default color  
+     if(closestSphere < 0)
+         return Miss(ray);
 
-    //Recalculate origin for closest sphere
-    glm::vec3 origin = ray.Origin - closestSphere->Position;
-    
-    //t = hit distance -> plug in original ray equation to find point -> a + bt 
-    //No need to do every coord by itself -> glm takes care of it
-    //glm::vec3 h0 = rayOrigin + rayDirection * t0;
-    glm::vec3 hitPoint = origin + ray.Direction * hitDistance;
-    //Can use hitpoint as color -> is a vec3. Basically take every coordinate of the hit points and use that as color
-    // x = r, y = g and z = b
-    //Negative on x and y will get clamped to 0 so we get blue in middle and bottom left
-    //More red going right x++
-    //More green going up y++
-
-    //We need to get direction sphere is facing in to correctly light it/shade it
-    //Need to know for every pixel where it is facing --> Get the normal for every pixel
-    //To get normal for every pixel in a sphere is easy -> subtract origin from the hit points
-    //Our current origin for our sphere = 0 -> hit point = normal
-    //Need to normalize to only get a direction vector not the whole radius (if radius is big, we dont want that)
-    //Just need the direction, length doesnt matter for the normal
-    glm::vec3 normal = glm::normalize(hitPoint);
-
-    //Now we are just shooting rays in -z direction and we dont get much out of the normals -> everything face us is
-    //in +z direction so everything is blue mostly
-    //We need a light direction on our sphere so we can compare our normals to that direction instead
-    //This way we can find HOW MUCH our surface is facing the light
-    //Define a direction vector going in -x, -y and -z -> from right, top and front
-    glm::vec3 lightDir = glm::normalize(glm::vec3(-1,-1,-1));
-
-    //direction of light is going towards us -> we want to compare normal with direction that is going towards light direction
-    //Incoming vs outgoing direction vector
-    //Negate incoming direction -> flips it
-    //To compare the 2 vectors we use the dot product
-    //It will tell us the relationship between the 2 directional vectors
-    //The value between -1 and 1 will tell how much the vectors look like each other 1 is exact same , -1 is total other direction
-    //We can use this to tell how much it is facing the light and make those areas lighter
-
-    //Clamp to 0 if result is negative = facing away
-    float d = glm::max(glm::dot(normal, -lightDir), 0.0f);
-    
-    glm::vec3 sphereColor = closestSphere->Albedo;
-    //result of dot product gives us the intensity of what the color should be
-    sphereColor *= d;
-    return {sphereColor, 1.0f};
-    //glm::vec4(sphereColor, 1.0f);
+    return ClosestHit(ray, hitDistance, closestSphere);
 }
