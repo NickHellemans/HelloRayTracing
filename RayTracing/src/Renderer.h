@@ -37,6 +37,9 @@ private:
     glm::vec4* m_AccumulationData = nullptr;
     Settings m_Settings;
     uint32_t m_FrameIndex = 1;
+    //Iterators for foreach for multithreading 
+    std::vector<uint32_t> m_ImageHorizontalIter, m_ImageVerticalIter;
+    
     //Basicly like a shader: Return a color per pixel from viewport based on coord in viewport
     //glm::vec4 PerPixel(glm::vec2 coord);
     
