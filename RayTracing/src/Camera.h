@@ -15,7 +15,7 @@ public:
     Camera(float verticalFOV, float nearClip, float farClip);
 
     //Needs to run on every frame with timestamp ts -> move around with constant speed independent on frame rate
-    void OnUpdate(float ts);
+    bool OnUpdate(float ts);
     
     //Recalculate projection matrix
     void OnResize(uint32_t width, uint32_t height);

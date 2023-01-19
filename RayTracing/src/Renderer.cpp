@@ -42,12 +42,19 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
     //Reallocate for new data
     //uint32 is 32 bits -> RGBA 1 byte for each color = 32bits
     m_ImageData = new uint32_t[width * height];
+
+    delete[] m_AccumulationData;
+    m_AccumulationData = new glm::vec4[width * height];
 }
 
 void Renderer::Render(const Scene& scene, const Camera& camera)
 {
     m_ActiveScene = &scene;
     m_ActiveCamera = &camera;
+
+    //Reset accumulation buffer with all 0s if on first frame 
+    if(m_FrameIndex == 1)
+        memset(m_AccumulationData, 0, m_FinalImage->GetWidth() * m_FinalImage->GetHeight() * sizeof(glm::vec4));
     
     //const glm::vec3& rayOrigin = camera.GetPosition();
 
@@ -68,15 +75,31 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
             
             //Get color for pixel
             glm::vec4 color = PerPixel(x, y);
+
+            //Store in accumulation data, no need to clamp - storing vec4 - we want it to be able exceed 1 to get good result
+            //Adding the color to the data already inside:
+            //FrameIndex == 1? --> nothing in there so color just get added
+            //if not 1 --> Accumulate with other data
+            m_AccumulationData[x + y * m_FinalImage->GetWidth()] += color;
+
+            //Average color of all accumulated data inside buffer - else we get a really bright color
+            glm::vec4 accumulatedColor = m_AccumulationData[x + y * m_FinalImage->GetWidth()];
+            accumulatedColor /= (float) m_FrameIndex;
+            
             //clamp values between 0 and 1 so we dont get any spill into other channels - 1 = 255 = max
             //GPU will do this for us but we are on CPU
-            color = glm::clamp(color,glm::vec4(0.0f), glm::vec4(1.0f));
+            accumulatedColor = glm::clamp(accumulatedColor,glm::vec4(0.0f), glm::vec4(1.0f));
             //Index = offset x with how big each row is - y * width
-            m_ImageData[x + y * m_FinalImage->GetWidth()] = Utils::ConvertToRGBA(color);
+            m_ImageData[x + y * m_FinalImage->GetWidth()] = Utils::ConvertToRGBA(accumulatedColor);
         }
     }
     //Upload to gpu for rendering - Inefficient to load data on cpu and transfer to GPU but will change later in series
     m_FinalImage->SetData(m_ImageData);
+
+    if(m_Settings.Accumulate)
+        m_FrameIndex++;
+    else
+        m_FrameIndex = 1;
 }
 
 glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
@@ -88,14 +111,14 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
     glm::vec3 color(0.0f);
     float multiplier = 1.0f;
     
-    int bounces = 2;
+    int bounces = 5;
     for(int i = 0; i < bounces; i++)
     {
         HitPayload payload = TraceRay(ray);
 
         if (payload.HitDistance < 0.0f)
         {
-            glm::vec3 skyColor = glm::vec3(0.0f,0.0f, 0.0f);
+            glm::vec3 skyColor = glm::vec3(0.6f,0.7f, 0.9f);
             color += skyColor * multiplier;
             break;
         }
@@ -119,15 +142,26 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
         float d = glm::max(glm::dot(payload.WorldNormal, -lightDir), 0.0f);
 
         const Sphere& sphere = m_ActiveScene->Spheres[payload.ObjectIndex];
-        glm::vec3 sphereColor = sphere.Albedo;
+        const Material& material = m_ActiveScene->Materials[sphere.MaterialIndex];
+        
+        glm::vec3 sphereColor = material.Albedo;
         //result of dot product gives us the intensity of what the color should be
         sphereColor *= d;
         color += sphereColor * multiplier;
-        multiplier *= 0.7f;
+        multiplier *= 0.5f;
 
         ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f; //move little bit forward so next ray doesnt collide with previous sphere
-        //reflect new ray around world normal of sphere
-        ray.Direction =  glm::reflect(ray.Direction, payload.WorldNormal);
+        //reflect new ray perfectly around world normal of sphere - this is not how it works in real world:
+        //every material has different microfacet (roughness) that scatters light in different ways
+        //So we randomly reflect the light in a defined cone (degree of this cone is defined by the roughness)
+        //This will create noise in the image - every frame will have different random ray directions with different results
+        //Path tracing will help clear up this noise:
+        //Every frame a random direction gets picked, thus creating the random noise from frame to frame
+        //Currently we send 1 ray, hit something, send 1 ray, ... for 5 bounces. We only send 1 ray. == 1 path of a ray
+        //We need to send out lots of these paths so we can evaluate and accumulate them all and average out the result
+        //This way we slowly converge to a result similar to millions of rays hitting you
+        //When camera is still it will accumulate paths, when moving it will not
+        ray.Direction =  glm::reflect(ray.Direction, payload.WorldNormal + material.Roughness * Walnut::Random::Vec3(-0.5f, 0.5f));
     }
 
     return {color, 1.0f};
